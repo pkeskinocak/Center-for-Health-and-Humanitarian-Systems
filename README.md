@@ -10,4 +10,4 @@
 
 
 
-[Click here] (https://chhs.gatech.edu) to visit the Georgia Tech CHHS website.
+[Click here](https://chhs.gatech.edu) to visit the Georgia Tech CHHS website.
