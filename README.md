@@ -9,5 +9,6 @@
 
 
 
+***
 
 [Click here](https://chhs.gatech.edu) to visit the Georgia Tech CHHS website.
