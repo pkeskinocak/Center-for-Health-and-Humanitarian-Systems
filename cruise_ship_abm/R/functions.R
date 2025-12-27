@@ -4125,5 +4125,5 @@ simulate_voyage_onerep_random <- function(net, cs_input, scenario = 1, seed = NU
 }
 
 
-
+#change covid_input to disease input 
 

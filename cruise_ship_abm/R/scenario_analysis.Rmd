@@ -713,6 +713,7 @@ library(stringr)
 library(ggtext)
 library(readxl)
 
+
 #get scenarios labels
 scenarios <- read_excel("Results/Analysis/scenario_labels.xlsx")
 
