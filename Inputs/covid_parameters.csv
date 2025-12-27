@@ -1,0 +1,22 @@
+Description,Parameter,AgeGroup,Distribution,Mean,SD,Notes
+Exposed,Te,General,Log-normal,1.668,0.271,This corresponds to a normal mean of 5.5 and SD 1.52
+Asymptomatic to recovered,Tasym_rec,General,Log-normal,2.049,0.246,This corresponds to a normal mean of 8 and SD 2
+Asymptomatic virus proliferation,"Tp,asym",General,Log-normal,0.997,0.762,NA
+Pre-symptomatic,Tpre-sym,General,Log-normal,-0.161,0.716,This corresponds to a normal mean of 1.1 and SD 0.9
+Symptomatic virus proliferation,"Tp,sym",General,Uniform,0,2,Uniform with min 0 and max 2
+Symptomatic to recovered,Tsym_rec,General,Log-normal,2.049,0.246,This corresponds to a normal mean of 8 and SD 2
+Symptomatic to hospitalized,Tsym_hosp,General,Log-normal,1.668,0.663,This corresponds to a normal mean of 6.6 and SD 4.9
+Hospitalization to recovered,Thosp_rec,General,Log-normal,2.839,0.338,"This corresponds to a normal mean of 18.1, SD 6.3"
+Hospitalization to dead,Thosp_dead,General,Log-normal,2.279,0.428,This corresponds to a normal mean of 10.7 and SD 4.8
+Probability of developing symptoms,Psym,0-12,Point estimate,0.821,NA,NA
+Probability of developing symptoms,Psym,13-17,Point estimate,0.821,NA,NA
+Probability of developing symptoms,Psym,18-64,Point estimate,0.821,NA,NA
+Probability of developing symptoms,Psym,65+,Point estimate,0.821,NA,NA
+Probability of become hospitalized,Phosp,0-12,Point estimate,0.016,NA,NA
+Probability of become hospitalized,Phosp,13-17,Point estimate,0.016,NA,NA
+Probability of become hospitalized,Phosp,18-64,Point estimate,0.18,NA,NA
+Probability of become hospitalized,Phosp,65+,Point estimate,0.3,NA,NA
+Probability of dying,Pdead,0-12,Point estimate,0,NA,NA
+Probability of dying,Pdead,13-17,Point estimate,0,NA,NA
+Probability of dying,Pdead,18-64,Point estimate,0.0515,NA,NA
+Probability of dying,Pdead,65+,Point estimate,0.3512,NA,NA

@@ -1,0 +1,13 @@
+Scenario,Network Type,Prop included,Min groups,Max groups,Group proportions,Min contacts,Max contacts
+1,Dining - Pass,1,1,4,"0.375,0.375,0.125,0.125",NA,NA
+1,Entertainment - Pass,0.7,1,4,"0.375,0.375,0.125,0.125",NA,NA
+1,Nightlife - Pass,0.35,NA,NA,NA,2,5
+1,Kids - Pass,0.3,1,4,"0.375,0.375,0.125,0.125",NA,NA
+1,Entertainment - Pass and Crew,NA,NA,NA,NA,8,8
+1,Dining - Pass and Crew,NA,NA,NA,NA,8,8
+1,Housekeeping - Pass and Crew,NA,NA,NA,NA,8,8
+1,Dining Front - Crew,0.15,NA,10,NA,NA,NA
+1,Dining Back - Crew,0.2,NA,10,NA,NA,NA
+1,Entertainment - Crew,0.15,NA,10,NA,NA,NA
+1,Housekeeping - Crew,0.25,NA,10,NA,NA,NA
+1,Other - Crew,0.25,NA,10,NA,NA,NA
