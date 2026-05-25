@@ -1,8 +1,8 @@
 # Cruise Ship Agent-Based Model
 
-This repository contains R scripts and input data for an agent-based model of infectious disease transmission on cruise ships. The model simulates passenger and crew interactions, disease progression, testing, masking, vaccination, quarantine, and scenario-level outcomes over a voyage.
+This repository contains R scripts and input data for an agent-based model of infectious disease transmission on cruise ships. The model simulates passenger and crew interactions and disease progression to evaluate interventions (testing, masking, vaccination, isolation/quarantine, and sanitation practices) and outcomes over a voyage.
 
-The current sample workflow is configured for COVID-19 transmission on a standard cruise ship network with three initially infected individuals.
+The sample workflow is configured for the case study on COVID-19 transmission on a standard cruise ship network with three initially infected individuals.
 
 ## Repository Structure
 
@@ -111,6 +111,54 @@ Important scenario columns in `Inputs/scenarios_sample.csv` include:
 - intervention settings for quarantine, vaccination, testing, and masking
 
 The values in `CruiseShip` and `Initial` must match R objects that are loaded before the simulation loop runs.
+
+## Adapting the Workflow
+
+This workflow can be adapted to other pathogens that spread through human-human transmission. The current implementation and input names are COVID-19 focused, so pathogen changes should begin with the disease and intervention input files.
+
+### Other Human-Human Transmitted Pathogens
+
+To model another pathogen, review and update:
+
+| File | What to change |
+| --- | --- |
+| `Inputs/covid_parameters.csv` | Disease-specific natural history parameters, including exposed duration, asymptomatic duration, presymptomatic duration, symptomatic duration, hospitalization duration, probability of symptoms, probability of hospitalization, and probability of death. |
+| `Inputs/scenarios_sample.csv` | Pathogen-specific scenario settings, including initial infections, transmission probabilities, testing assumptions, vaccination assumptions, masking assumptions, quarantine assumptions, and intervention timing. |
+| `Inputs/cs_input_for_network_setup.xlsx` | Initial disease-state assumptions used when creating initialized populations, especially the number of initially exposed, symptomatic, asymptomatic, and recovered passengers and crew. |
+| `R/functions.R` | Review if the new pathogen does not fit the current COVID-style disease-state model. In particular, `getViralLoad()`, `convert_Ct_logGEML()`, and `getTransmissibilityFactor_new()` contain viral-load and Ct-based assumptions, and the state transition logic in `setAgentState()` assumes exposed, asymptomatic, presymptomatic, symptomatic, hospitalized, dead, recovered, quarantined, and removed states. |
+| `R/scenario_analysis.Rmd` | Review labels, plot titles, saved filenames, and outcome definitions that refer to COVID-19. |
+
+If the pathogen can be represented with the same state structure and intervention types, most changes may be limited to the input files. If the pathogen has different infectious states, no asymptomatic/presymptomatic period, different detectability, a different viral-load model, or different intervention logic, update `R/functions.R` as well.
+
+After changing pathogen inputs, regenerate initialized populations if initial disease states or disease parameters changed:
+
+```r
+source("R/create_networks.R")
+```
+
+Then confirm that the simulation scripts load the regenerated network and initial-population objects.
+
+### Other Ship Configurations
+
+To model a different ship configuration, such as a larger ship, different crew structure, larger passenger travel groups, or a population with a specific age distribution, review and update:
+
+| File | What to change |
+| --- | --- |
+| `Inputs/cs_input_for_network_setup.xlsx` | Ship-level setup used during network creation, including number of passengers, number of crew, trip duration, crew cabin group proportions, initial disease states, and baseline contact/transmission assumptions used for initialization. |
+| `Inputs/demographics_scenarios.xlsx` | Passenger travel-group size and age-composition distributions for standard, senior, and family ship types. Change this file to represent larger passenger groups or a different age distribution. |
+| `Inputs/network_parameters.csv` | Contact-network assumptions for activity and work networks, including the proportion included, minimum and maximum groups, group proportions, and minimum and maximum contacts. |
+| `Inputs/scenarios_sample.csv` | Scenario-level ship object names, initial-population object names, passenger and crew counts, trip duration, transmission probabilities, and intervention settings used during the simulation runs. |
+| `R/create_networks.R` | Review if adding new ship types beyond the current standard, family, and senior workflows. This script currently reads those demographic sheets and creates `std_net`, `fam_net`, and `sen_net`. |
+| `R/run_single.R` and `R/run_parallel.R` | Review if the generated network or initial-population filenames change. The sample scripts currently load `Inputs/std_net.rdata` and `Inputs/initial_std_net_I3.rdata`. |
+| `R/functions.R` | Review before changing age group labels or crew structure. Several functions assume the age groups `0-12`, `13-17`, `18-64`, and `65+`, and crew are assigned to `18-64` in `makeDemographicNetwork()`. |
+
+After changing ship configuration inputs, regenerate the network and initial-population objects:
+
+```r
+source("R/create_networks.R")
+```
+
+Then update or resave the generated `.rdata` files so the names in `Inputs/scenarios_sample.csv`, `R/run_single.R`, and `R/run_parallel.R` all match.
 
 ## Step 2: Create Generated Inputs
 
