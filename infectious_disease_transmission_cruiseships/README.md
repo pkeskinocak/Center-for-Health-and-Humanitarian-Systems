@@ -354,6 +354,13 @@ At a high level, the model:
 - Large `.rdata` result files can be regenerated from the scripts and input files.
 - Random seeds are set in network initialization functions, but simulation results may still vary depending on workflow changes and parallel execution settings.
 
+## Funding
+
+This work was supported by the U.S. National Science Foundation (NSF) under Award No. 2246678, **“RAPID: Modeling of COVID-19 Transmission in Cruise Ships and Evaluating the Impact of Mitigation Measures.”**
+
+The contents of this repository are the responsibility of the authors and do not necessarily represent the official views of the National Science Foundation.
+
 ## Citation
 
-If this repository supports a publication or report, add the preferred citation here.
+If you use this software, please cite it using the metadata in `CITATION.cff`.
+
