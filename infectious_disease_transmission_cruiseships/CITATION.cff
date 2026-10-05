@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+
+message: "If you use this software or associated data in your research, please cite it using the metadata from this file. This software and associated data are available for non-commercial academic and research use with appropriate attribution. Commercial use requires a separate license from the Georgia Institute of Technology."
+
+title: "Agent-Based Model of Infectious Disease Transmission on Cruise Ships"
+
+abstract: "R scripts, model inputs, scenario parameters, processed datasets, calibration data, and simulation outputs for an agent-based model of infectious disease transmission and public health interventions on cruise ships."
+
+authors:
+  - family-names: "Fujimoto Wakabayashi"
+    given-names: "Akane Bianca"
+  - family-names: "Keskinocak"
+    given-names: "Pinar"
+
+repository-code: "https://github.com/pkeskinocak/Center-for-Health-and-Humanitarian-Systems/tree/master/infectious_disease_transmission_cruiseships"
+
+version: "1.0.0"
+
+keywords:
+  - "agent-based modeling"
+  - "infectious disease transmission"
+  - "cruise ships"
+  - "public health interventions"
+  - "simulation"
+  - "R"
+
+date-released: "2026-10-05"
