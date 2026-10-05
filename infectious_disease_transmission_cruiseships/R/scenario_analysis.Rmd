@@ -1,0 +1,1027 @@
+---
+title: "Scenario Analysis"
+author: "Akane Fujimoto"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(magrittr)
+library(readxl)
+library(ggpubr)
+
+```
+
+## Functions
+
+```{r}
+
+#To aggregate number in each state by day (first instance )
+unique_day_agg <- function(results_list, scenarios = 2, reps = 500) {
+  
+  unique_results_agg <-data.frame(matrix(ncol = 9, nrow = 0))
+  names(unique_results_agg) <-  c("day", "E_pass", "Ia_pass", "Ipres_pass","Is_pass",
+                             "E_crew","Ia_crew", "Ipres_crew", "Is_crew")
+  
+  for (scenario_index in 1:scenarios) {
+  
+    print(paste0("Scenario ", scenario_index, "/", scenarios))
+
+    scenario <- results_list[[scenario_index]]
+  
+    for (rep_index in 1:reps) {
+    
+      rep <- scenario[,rep_index]
+    
+      #get dataframes 
+      pass <- rep$indhistory_pass
+      crew <- rep$indhistory_crew
+    
+      #combine in one
+      results <- left_join(pass, crew, by = "day")
+    
+      results <- results %>%
+        complete(day = 1:7)
+
+      #labels
+      results$Scenario <- scenario_index
+      results$Rep <- rep_index
+    
+      #aggregate
+      unique_results_agg <- bind_rows(unique_results_agg, results)
+    
+    }
+  }
+  
+  #cumulative
+  results_agg <- unique_results_agg %>%
+    mutate(across(everything(), ~replace_na(., 0))) %>%
+    group_by(Scenario, Rep) %>%
+    mutate(across(c(E_pass:Is_crew), cumsum, .names = "cum_{col}"))
+  
+  return(results_agg)
+
+}
+
+#To get daily count
+
+daily_agg <- function(results_list, scenarios = 2, reps = 500) {
+  
+  daily_results_agg <-data.frame(matrix(ncol = 26, nrow = 0))
+  col_labels <-  c("day", "S_pass", "E_pass", "Asymp_pass", "Pres_pass", "Symp_pass", "QInf_pass", "QNinf_pass",
+                                  "Hosp_pass", "Dead_pass", "Rec_pass", "Rem_pass", "day_2",
+                                  "S_crew", "E_crew", "Asymp_crew","Pres_crew",  "Symp_crew", "QInf_crew", "QNinf_crew",
+                                  "Hosp_crew", "Dead_crew", "Rec_crew", "Rem_crew", "scenario", "rep")
+  
+  for (scenario_index in 1:scenarios) {
+  
+    scenario <- results_list[[scenario_index]]
+    print(paste0("Scenario ", scenario_index, "/", scenarios))
+
+    for (rep_index in 1:reps) {
+    
+      rep <- scenario[,rep_index]
+    
+      #get dataframes 
+      pass <- rep$summaryhistory_pass
+      crew <- rep$summaryhistory_crew
+    
+      #combine in one
+      results <- cbind(pass, crew)
+      results <- data.frame(results)
+      
+      #labels
+      results$Scenario <- scenario_index
+      results$Rep <- rep_index
+    
+      #aggregate
+      daily_results_agg  <- rbind(daily_results_agg, results)
+    
+    }
+  }
+  
+  #names
+  names(daily_results_agg) <- col_labels
+  
+  daily_results_agg <- daily_results_agg %>%
+    select(-day_2)
+
+  return(daily_results_agg)
+
+}
+
+
+## To compare outcomes from different scenarios 
+
+outcome_comp <- function(result_df , scenarioA , scenarioB, variable =  "cum_E_pass", day_selected = 7) {
+  
+  data1 <- result_df %>%
+    ungroup() %>%
+    filter(label == scenarioA & day == day_selected) %>%
+    dplyr::select(variable) %>%
+    pull(variable)
+  
+  data2 <- result_df %>%
+    ungroup() %>%
+    filter(label == scenarioB & day == day_selected) %>%
+    dplyr::select(variable) %>%
+    pull(variable)
+  
+  #plot
+  figure <- ggplot() + geom_density(aes(x=data1, color = "Scenario A")) + geom_density(aes(x=data2, color = "Scenario B")) + 
+    scale_color_brewer(palette = "Dark2", name = "") + theme_bw() + theme(legend.position = "top")
+  
+  #normality test
+  norm_test_1 <- shapiro.test(data1)
+  norm_test_2 <- shapiro.test(data2)
+  
+  #pvalue
+  norm_pvalue_1 <- norm_test_1$p.value
+  norm_pvalue_2 <- norm_test_2$p.value
+
+  #var test
+  var_test <- var.test(data1, data2)
+  var_pvalue <- var_test$p.value
+  
+  #t-test
+  t_test_equalvar = t.test(data1, data2, var.equal = TRUE)
+  t_test_diffvar = t.test(data1, data2, var.equal = FALSE)
+  
+  #wilcoxon
+  wilcox = wilcox.test(data1, data2)
+  
+  return(list(plot = figure,
+              norm_test = c(norm_pvalue_1, norm_pvalue_2),
+              var_test = var_pvalue,
+              t_test_equalvar = t_test_equalvar,
+              t_test_diffvar =  t_test_diffvar,
+              wilcox_test = wilcox))
+  
+}
+
+
+## Calculate total exposed by day
+summary_exposed_byday <- function(dataframe, LO, vars = c("day", "mean_E_pass",
+                                                  "mean_E_crew",
+                                                  "CI_pass_exp", "CI_crew_exp") ) {
+  
+  zscore = qnorm((1 + 0.95) / 2)
+
+  #filter by day 
+  df <- dataframe %>%
+    filter(day %in% c(7,14)) %>%
+    rename(scenario = Scenario)
+  
+  score <- qt(0.975, df = 499)
+  #group
+  df <- df %>%
+    group_by(scenario, day) %>%
+    summarise(n = n(),
+            mean_E = mean(cum_E_pass + cum_E_crew),
+            mean_E_pass = mean(cum_E_pass),
+            mean_E_crew = mean(cum_E_crew),
+            sd_E = sd(cum_E_pass + cum_E_crew),
+            sd_E_pass = sd(cum_E_pass),
+            sd_E_crew = sd(cum_E_crew),
+            margin_pass = score*(sd_E_pass/sqrt(500)),
+            margin_crew =score*(sd_E_crew/sqrt(500)),
+            ub_pass = mean_E_pass + margin_pass,
+            lb_pass = mean_E_pass - margin_pass,
+            ub_crew = mean_E_crew + margin_crew,
+            lb_crew = mean_E_crew - margin_crew,
+            hw_E = zscore*sd_E/sqrt(n),
+            hw_E_pass = zscore*sd_E_pass/sqrt(n),
+            hw_E_crew = zscore*sd_E_crew/sqrt(n))%>%
+  mutate(valid = if_else(hw_E < 0.05*mean_E, "valid", "invalid"))
+  
+  #round
+  df <- df %>%
+    ungroup() %>%
+    mutate_if(is.numeric, round, 1)
+  
+  #CIs
+  df <- df %>%
+    mutate(CI_pass_exp = paste0("(",lb_pass, "-", ub_pass, ")"),
+           CI_crew_exp = paste0("(",lb_crew, "-", ub_crew, ")"))
+  
+  #select
+  df <- df %>%
+    select(all_of(vars))
+  
+  df$LO <- LO
+  
+  return(df)
+}
+
+# Calculates total symptomatic by date 
+summary_symp_byday <- function(dataframe, LO, vars = c("day", "mean_Is_pass",
+                                                  "mean_Is_crew",
+                                                  "CI_pass_Is", "CI_crew_Is") ) {
+  
+  zscore = qnorm((1 + 0.95) / 2)
+
+  #filter by day 
+  df <- dataframe %>%
+    filter(day %in% c(7,14)) %>%
+    rename(scenario = Scenario)
+  
+  score <- qt(0.975, df = 499)
+  #group
+  df <- df %>%
+    group_by(scenario, day) %>%
+    summarise(n = n(),
+            mean_Is = mean(cum_Is_pass + cum_Is_crew),
+            mean_Is_pass = mean(cum_Is_pass),
+            mean_Is_crew = mean(cum_Is_crew),
+            sd_Is = sd(cum_Is_pass + cum_Is_crew),
+            sd_Is_pass = sd(cum_Is_pass),
+            sd_Is_crew = sd(cum_Is_crew),
+            margin_pass = score*(sd_Is_pass/sqrt(500)),
+            margin_crew =score*(sd_Is_crew/sqrt(500)),
+            ub_pass = mean_Is_pass + margin_pass,
+            lb_pass = mean_Is_pass - margin_pass,
+            ub_crew = mean_Is_crew + margin_crew,
+            lb_crew = mean_Is_crew - margin_crew,
+            hw_Is = zscore*sd_Is/sqrt(n),
+            hw_Is_pass = zscore*sd_Is_pass/sqrt(n),
+            hw_Is_crew = zscore*sd_Is_crew/sqrt(n))%>%
+  mutate(valid = if_else(hw_Is < 0.05*mean_Is, "valid", "invalid"))
+  
+  #round
+  df <- df %>%
+    ungroup() %>%
+    mutate_if(is.numeric, round, 1)
+  
+  #CIs
+  df <- df %>%
+    mutate(CI_pass_Is = paste0("(",lb_pass, "-", ub_pass, ")"),
+           CI_crew_Is = paste0("(",lb_crew, "-", ub_crew, ")"))
+  
+  #select
+  df <- df %>%
+    select(all_of(vars))
+  
+  df$LO <- LO
+  
+  return(df)
+}
+
+
+# Calculates total isolated by date 
+summary_iso_byday <- function(dataframe, LO = "No", extended = "No") {
+  
+   #get cumulative
+  dataframe <- dataframe %>%
+    #filter(day %in% c(7,14)) %>%
+    rename(cum_Qinf_pass = QInf_pass,
+           cum_QNinf_pass = QNinf_pass,
+           cum_Qinf_crew = QInf_crew,
+           cum_QNinf_crew = QNinf_crew) %>%
+    select(c(scenario, day, rep,cum_Qinf_pass, cum_QNinf_pass,
+             cum_Qinf_crew, cum_QNinf_crew))
+  
+  
+  #add if the row doesnt exist
+  set1 <- dataframe %>%
+    select(c(day, scenario, rep))
+  
+  #full
+  full <- expand.grid("day" = 7,
+                    "scenario" = 1:36,
+                    "rep" = 1:500)
+
+  #add
+  to_add <- anti_join(full,set1)
+  
+  df <- bind_rows(dataframe, to_add) %>%
+      arrange(scenario, rep, day) %>%
+      group_by(scenario, rep) %>%
+      fill(cum_Qinf_pass, cum_QNinf_pass,cum_Qinf_crew, cum_QNinf_crew, .direction = "down") %>%
+      filter(day == 7) 
+  
+  zscore = qnorm((1 + 0.95) / 2)
+
+  score <- qt(0.975, df = 499)
+  
+  #group
+  df <- df %>%
+    group_by(scenario, day) %>%
+    summarise(n = n(),
+            mean_Q = mean(cum_Qinf_pass + cum_Qinf_crew+
+                          cum_QNinf_pass + cum_QNinf_crew),
+            mean_Q_pass_inf = mean(cum_Qinf_pass),
+            mean_Q_pass_notinf = mean(cum_QNinf_pass), 
+            mean_Q_pass = mean(cum_Qinf_pass + cum_QNinf_pass ),
+            mean_Q_crew = mean(cum_Qinf_crew + cum_QNinf_crew ),
+            sd_Q = sd(cum_Qinf_pass + cum_Qinf_crew+
+                          cum_QNinf_pass + cum_QNinf_crew),
+            sd_Q_pass = sd(cum_Qinf_pass + cum_QNinf_pass),
+            sd_Q_crew = sd(cum_Qinf_crew + cum_QNinf_crew),
+            margin_pass = score*(sd_Q_pass/sqrt(500)),
+            margin_crew =score*(sd_Q_crew/sqrt(500)),
+            ub_pass = mean_Q_pass + margin_pass,
+            lb_pass = mean_Q_pass - margin_pass,
+            ub_crew = mean_Q_crew + margin_crew,
+            lb_crew = mean_Q_crew - margin_crew)
+  
+  #round
+  df <- df %>%
+    ungroup() %>%
+    mutate_if(is.numeric, round, 1)
+  
+  #CIs
+  df <- df %>%
+    mutate(CI_pass_Q = paste0("(",lb_pass, "-", ub_pass, ")"),
+           CI_crew_Q = paste0("(",lb_crew, "-", ub_crew, ")"))
+  
+  #select
+  if (extended == "No ") {
+     df <- df %>%
+      select(c(scenario, day, mean_Q, mean_Q_pass, CI_pass_Q, mean_Q_crew, CI_crew_Q))
+  } else if (extended == "Yes") {
+     df <- df %>%
+        select(c(scenario, day, mean_Q,mean_Q_pass_inf, mean_Q_pass_notinf, mean_Q_pass, CI_pass_Q, mean_Q_crew, CI_crew_Q))
+
+  }
+  
+  df$LO <- LO
+  
+  return(df)
+}
+
+
+#To aggregate number in each state by day (first instance)
+check_LO <- function(results_list, scenarios = 2, reps = 500) {
+  
+  active_agg <-data.frame(matrix(ncol = 4, nrow = 0))
+  names(active_agg) <-  c("day", "LO_status", "scenario", "rep")
+  
+  for (scenario_index in 1:scenarios) {
+  
+    scenario <- results_list[[scenario_index]]
+    print(paste0("Scenario ", scenario_index, "/", scenarios))
+    for (rep_index in 1:reps) {
+    
+      rep <- scenario[,rep_index]
+    
+      #get dataframes 
+      results <- rep$operations_track
+
+      results <- data.frame(results)
+      #labels
+      results$Scenario <- scenario_index
+      results$Rep <- rep_index
+    
+      names(results) <- c("day", "LO_status", "scenario", "rep")
+       
+      #aggregate
+      active_agg <- rbind(active_agg, results)
+    
+    }
+  }
+
+  active_agg <- active_agg %>%
+    filter(!is.na(day))
+  
+  return(active_agg)
+
+}
+
+## Calculates max daily number of exposed 
+
+peak_exposed <- function(dataframe, LO = "No") {
+  
+  #get cumulative
+  dataframe <- dataframe %>%
+    filter(day <= 7) %>%
+    group_by(scenario, rep) %>%
+    summarise(peak_exp = max(E_pass + E_crew),
+              peak_exp_pass = max(E_pass),
+              peak_exp_crew = max(E_crew)) %>%
+    ungroup() 
+  
+  zscore = qnorm((1 + 0.95) / 2)
+
+  #filter by day 
+  df <- dataframe 
+  
+  score <- qt(0.975, df = 499)
+  
+  #group
+  df <- df %>%
+    group_by(scenario) %>%
+    summarise(n = n(),
+            mean_peak_exp = mean(peak_exp),
+            mean_peak_exp_pass = mean(peak_exp_pass),
+            mean_peak_exp_crew = mean(peak_exp_crew),
+            sd_peak_exp = sd(peak_exp),
+            sd_peak_exp_pass = sd(peak_exp_pass),
+            sd_peak_exp_crew = sd(peak_exp_crew),
+            margin_pass = score*(sd_peak_exp_pass/sqrt(500)),
+            margin_crew =score*(sd_peak_exp_crew/sqrt(500)),
+            ub_pass = mean_peak_exp_pass + margin_pass,
+            lb_pass =mean_peak_exp_pass- margin_pass,
+            ub_crew = mean_peak_exp_crew + margin_crew,
+            lb_crew = mean_peak_exp_crew - margin_crew)
+  
+  #round
+  df <- df %>%
+    ungroup() %>%
+    mutate_if(is.numeric, round, 1)
+  
+  #CIs
+  df <- df %>%
+    mutate(CI_pass_peak = paste0("(",lb_pass, "-", ub_pass, ")"),
+           CI_crew_peak = paste0("(",lb_crew, "-", ub_crew, ")"))
+  
+  #select
+  df <- df %>%
+    select(c(scenario,  mean_peak_exp, mean_peak_exp_pass, CI_pass_peak,
+             mean_peak_exp_crew, CI_crew_peak))
+  
+  df$LO <- LO
+  
+  return(df)
+  
+}
+
+
+# Calculates number of replications that have at least x exposed 
+num_rep_outbreak_exp <- function(cum_results, Day = 7, min_exp = 2) {
+  
+  reps <- max(cum_results$Rep)
+  
+  analysis <- cum_results %>%
+    filter(day == Day & cum_E_pass >= min_exp) %>%
+    select(c(day, cum_E_pass, Scenario, Rep)) %>%
+    group_by(Scenario) %>%
+    summarise(count_exp = n()) %>%
+    mutate(perc_exp = count_exp/reps*100)
+  
+  return(analysis)
+
+}
+
+## Calculates number of replications that have at least x symptomatic
+num_rep_outbreak_symp <- function(cum_results, Day = 7, min_sym = 2) {
+  
+  reps <- max(cum_results$Rep)
+  analysis <- cum_results %>%
+    filter(day == Day & cum_Is_pass >= min_sym) %>%
+    select(c(day, cum_Is_pass, Scenario, Rep)) %>%
+    group_by(Scenario) %>%
+    summarise(count_sym = n()) %>%
+    mutate(perc_sym = count_sym/reps*100)
+  
+  return(analysis)
+
+}
+
+## Calculates number of replications that have at least x isolated
+num_rep_outbreak_iso <- function(cum_results, Day = 7, min_iso = 2) {
+  
+  
+  reps <- max(cum_results$rep)
+  
+  analysis <- cum_results %>%
+    mutate(Q = QInf_pass + QNinf_pass) %>% 
+    filter(day == Day & Q >= min_iso) %>%
+    select(c(day, Q, scenario, rep)) %>%
+    group_by(scenario) %>%
+    summarise(count_iso = n()) %>%
+    mutate(perc_iso = count_iso/reps*100) %>%
+    rename(Scenario = scenario)
+  
+  return(analysis)
+
+}
+
+```
+
+
+## Calculate number of exposed by day 7 and day 14 by scenario
+
+```{r}
+
+#load data
+
+#Infections: 1
+load("Results/results_I1_noLO.rdata")
+
+
+#Infections:3
+load("Results/results_I3_noLO.rdata")
+
+#Infections: 5
+load("Results/results_I5_noLO.rdata")
+
+#parameters
+n_scenarios <- length(results_I1_noLO)
+n_reps <- unique(lengths(results_I1_noLO)/11)
+
+```
+
+# Get dataframes per scenario
+
+In this step we calculate the cumulative and daily number of agents in each state across all replications and scenarios 
+
+```{r}
+
+#Infections:1 
+results_unique_I1 <- unique_day_agg(results_I1_noLO, scenarios = n_scenarios, reps = n_reps)
+results_daily_I1 <- daily_agg(results_I1_noLO, scenarios = n_scenarios, reps = n_reps ) 
+
+#Infections:3 
+results_unique_I3 <- unique_day_agg(results_I3_noLO, scenarios = n_scenarios, reps = n_reps)
+results_daily_I3 <- daily_agg(results_I3_noLO, scenarios = n_scenarios, reps = n_reps )
+
+
+#Infections:5 
+results_unique_I5 <- unique_day_agg(results_I5_noLO, scenarios = n_scenarios, reps = n_reps)
+results_daily_I5 <- daily_agg(results_I5_noLO, scenarios = n_scenarios, reps = n_reps )
+
+
+#combine
+results_unique_I1$initial_infections = 1
+results_unique_I3$initial_infections = 3
+results_unique_I5$initial_infections = 5
+results_unique <- c(results_unique_I1, results_unique_I3, results_unique_I5)
+
+results_daily_I1$initial_infections = 1
+results_daily_I3$initial_infections = 3
+results_daily_I5$initial_infections = 5
+
+results_daily <- c(results_daily_I1, results_daily_I3, results_daily_I5)
+
+save(results_unique, results_daily, file = "Results/Analysis/results_state_byday.rdata")
+
+```
+
+
+# Number of outbreaks by scenario
+
+Calculate the number of outbreaks across al replications by scenario
+
+```{r}
+
+#Infections 1 
+outbreak_exp_I1 <- num_rep_outbreak_exp(results_unique_I1, Day = 7, min_exp = 1)
+outbreak_sym_I1 <- num_rep_outbreak_symp(results_unique_I1, Day = 7, min_sym = 2)
+outbreak_iso_I1  <- num_rep_outbreak_iso(results_daily_I1, Day = 7, min_iso =1)
+
+outbreak_I1 <- left_join(outbreak_exp_I1, outbreak_sym_I1, by = "Scenario")
+outbreak_I1 <- left_join(outbreak_I1, outbreak_iso_I1, by = "Scenario")
+
+outbreak_I1 %<>%
+  replace_na() %>%
+  mutate(across(everything(), ~ replace(., is.na(.), 0)))
+
+outbreak_I1$initial_infections = "I1"
+
+
+#Infections 3 
+outbreak_exp_I3 <- num_rep_outbreak_exp(results_unique_I3, Day = 7, min_exp = 1)
+outbreak_sym_I3 <- num_rep_outbreak_symp(results_unique_I3, Day = 7, min_sym = 4)
+outbreak_iso_I3  <- num_rep_outbreak_iso(results_daily_I3, Day = 7, min_iso =1)
+
+outbreak_I3 <- left_join(outbreak_exp_I3, outbreak_sym_I3, by = "Scenario")
+outbreak_I3 <- left_join(outbreak_I3, outbreak_iso_I3, by = "Scenario")
+
+outbreak_I3 %<>%
+  replace_na() %>%
+  mutate(across(everything(), ~ replace(., is.na(.), 0)))
+
+outbreak_I3$initial_infections = "I3"
+
+#Infections 5 
+outbreak_exp_I5 <- num_rep_outbreak_exp(results_unique_I5, Day = 7, min_exp = 1)
+outbreak_sym_I5 <- num_rep_outbreak_symp(results_unique_I5, Day = 7, min_sym = 6)
+outbreak_iso_I5  <- num_rep_outbreak_iso(results_daily_I5, Day = 7, min_iso =1)
+
+outbreak_I5 <- left_join(outbreak_exp_I5, outbreak_sym_I5, by = "Scenario")
+outbreak_I5 <- left_join(outbreak_I5, outbreak_iso_I5, by = "Scenario")
+
+outbreak_I5 %<>%
+  replace_na() %>%
+  mutate(across(everything(), ~ replace(., is.na(.), 0)))
+
+outbreak_I5$initial_infections = "I5"
+
+#combine
+results_outbreaks <- bind_rows(outbreak_I1, outbreak_I3, outbreak_I5)
+
+save(results_outbreaks, file = "Results/Analysis/results_outbreaks.rdata")
+
+```
+
+# Cumulative exposed by day 7 
+
+Calculate number of exposed individuals by day 7
+
+```{r}
+
+#Infections 1
+exp_I1 <- summary_exposed_byday(results_unique_I1, vars = c("scenario", "day", "mean_E_pass", "CI_pass_exp", "mean_E_crew", "CI_crew_exp"),  LO = "No")
+exp_I1$initial_infections = "I1"
+
+exp_I3 <- summary_exposed_byday(results_unique_I3, vars =c("scenario", "day", "mean_E_pass", "CI_pass_exp","mean_E_crew", "CI_crew_exp"),  LO = "No")
+exp_I3$initial_infections = "I3"
+
+exp_I5 <- summary_exposed_byday(results_unique_I5, vars = c("scenario", "day", "mean_E_pass", "CI_pass_exp","mean_E_crew", "CI_crew_exp"),  LO = "No")
+exp_I5$initial_infections = "I5"
+
+#COMBINE
+results_summary_exposed <- bind_rows(exp_I1, exp_I3, exp_I5) %>%
+  filter(day == 7) %>%
+  select(-day)
+
+save(results_summary_exposed, file = "Results/Analysis/results_summary_exposed.rdata")
+
+```
+
+## Custom labels for plots
+
+```{r}
+
+# Custom labels function to bold the 7th letter
+vax_mask_labels <- function(labels) {
+  sapply(labels, function(label) {
+     
+    if (grepl("\\+", label)) {
+      # Bold both the first and the seventh letters if "+" is present
+      first_part <- paste0("<b>", substr(label, 1, 1), "</b>", substr(label, 2, 6))
+      if (nchar(label) >= 7) {
+        bolded_seventh <- paste0("<b>", substr(label, 7, 7), "</b>")
+        rest <- substr(label, 8, nchar(label))
+        paste0(first_part, bolded_seventh, rest)
+      } else {
+        first_part
+      }
+      } else if (nchar(label) >= 7) {
+      paste0(
+        substr(label, 1, 6),       # First 6 letters
+        "<b>", substr(label, 7, 7), "</b>",  # Bold the 7th letter using HTML <b> tags
+        substr(label, 8, nchar(label)) # Rest of the label
+      )
+    } else {
+      # If the label is shorter than 7 letters, return it as is
+            paste0("<b>", substr(label, 1, 1), "</b>", substr(label, 2, nchar(label)))
+
+    }
+  })
+}
+
+custom_facet_labels <- function(labels) {
+  sapply(labels, function(label) {
+    if (grepl("\\+", label)) {
+      # Bold both the first and the seventh letters if "+" is present
+      first_part <- paste0("<b>", substr(label, 1, 1), "</b>", substr(label, 2, 6))
+      if (nchar(label) >= 7) {
+        bolded_seventh <- paste0("<b>", substr(label, 7, 7), "</b>")
+        rest <- substr(label, 8, nchar(label))
+        paste0(first_part, bolded_seventh, rest)
+      } else {
+        first_part
+      }
+    } else if (nchar(label) >= 7) {
+      # Bold only the seventh letter for labels longer than 7 characters without "+"
+      paste0(
+        substr(label, 1, 6),
+        "<b>", substr(label, 7, 7), "</b>",
+        substr(label, 8, nchar(label))
+      )
+    } else {
+      # Bold only the first letter for shorter labels without "+"
+      paste0("<b>", substr(label, 1, 1), "</b>", substr(label, 2, nchar(label)))
+    }
+  })
+}
+```
+
+
+## Plot exposed 
+
+Create visualizations of cumulative number of exposed agents by the end of the simulation by scenario.
+
+```{r}
+library(stringr)
+library(ggtext)
+library(readxl)
+
+
+#get scenarios labels
+scenarios <- read_excel("Results/Analysis/scenario_labels.xlsx")
+
+scenarios %<>%
+  rename(scenario = Number) %>%
+  select(c(scenario, Vaccination, Testing, Mask))
+
+summary_exposed_plot <- left_join(results_summary_exposed, scenarios)
+
+#format
+
+
+#new 
+summary_exposed_plot %<>%
+  mutate(Vaccination = case_when(Vaccination == "X" ~ "None",
+                                 Vaccination == "L" ~ "Low",
+                                 Vaccination == "H" ~ "High"),
+         Testing = case_when(Testing == "X" ~ "None",
+                             Testing == "S" ~ "Sym",
+                             Testing == "ST" ~ "Sym + TG"),
+         Mask = case_when(Mask == "X" ~ "None",
+                          Mask == "L" ~ "Low",
+                          Mask == "M" ~ "Medium",
+                          Mask == "H" ~ "High")) %>%
+  mutate(Vaccination = factor(Vaccination, levels = c("None", "Low", "High")),
+         Testing = factor(Testing, levels = c("None", "Sym", "Sym + TG")),
+         Mask = factor(Mask, levels = c("None", "Low", "Medium", "High")))
+
+#labels
+# Apply custom labels directly to facet_wrap
+#summary_exposed_plot$Vaccination <- factor(summary_exposed_plot$Vaccination, levels = #unique(summary_exposed_plot$Vaccination))
+facet_labels <- custom_facet_labels(levels(summary_exposed_plot$Vaccination))
+
+summary_exposed_plot %>%
+  filter(initial_infections == "I1") %>%
+  ggplot() + geom_tile(aes(x=Testing, y = Mask, fill = mean_E_pass), color = "black") +
+  facet_wrap(~Vaccination, labeller = labeller(Vaccination = facet_labels)) +
+    theme_bw() + scale_x_discrete(labels = vax_mask_labels) + 
+  scale_y_discrete(labels = vax_mask_labels) +
+   theme(legend.position = "",  
+        plot.title = element_text(hjust = 0, size = 15, face = "bold"),
+        axis.text.x = element_markdown(size = 18),
+        axis.text.y = element_markdown(size = 18),
+        axis.title.x = element_text(size = 20, face = "bold"),
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 20),
+        legend.title =element_text(size = 20),
+        strip.background = element_blank(),strip.text=element_markdown(size = 18)) +
+  ggtitle("Vaccination") + ylab("Mask usage") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Mean exposed passengers") +
+  geom_text(aes(x=Testing, y = Mask, label = round(mean_E_pass,1)), vjust = -1 ,size = 6) +
+  geom_text(aes(x=Testing, y = Mask, label = CI_pass_exp), vjust = 2, size = 5) +
+  ggtitle("Number of exposed passengers by day 7")
+
+summary_exposed_plot%>%
+  filter(initial_infections == "I1") %>%
+  ggplot() + geom_tile(aes(x=Testing, y = Mask, fill = mean_E_crew), color = "black") +
+  facet_wrap(~Vaccination) +
+    theme_bw() + scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) + theme_bw() + 
+   theme(legend.position = "",  
+        plot.title = element_text(hjust = 0, size = 15, face = "bold"),
+        axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.title.x = element_text(size = 16, face = "bold"),
+        axis.title.y = element_text(size = 16, face = "bold"),
+        legend.text = element_text(size = 16),
+        legend.title =element_text(size = 16),
+        strip.background = element_blank(),strip.text=element_text(size = 15)) +
+  ggtitle("Vaccination") + ylab("Mask usage") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Mean exposed passengers")  +
+  geom_text(aes(x=Testing, y = Mask, label = round(mean_E_crew,1)), size = 6)  +
+  geom_text(aes(x=Testing, y = Mask, label = CI_crew_exp), vjust = 2, size = 5) +
+  ggtitle("Number of exposed crew by day 7")
+
+
+#Infections 3
+
+summary_exposed_plot %>%
+  filter(initial_infections == "I3") %>%
+    mutate(AR = round(mean_E_pass/2000*100,1)) %>%
+  ggplot() + geom_tile(aes(x=Testing, y = Mask, fill = mean_E_pass), color = "black") +
+  facet_wrap(~Vaccination) +
+             #, labeller = labeller(Vaccination = facet_labels)) +
+    theme_bw() + 
+  #scale_x_discrete(labels = vax_mask_labels) + 
+  #scale_y_discrete(labels = vax_mask_labels) +
+   theme(legend.position = "",  
+        plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+        axis.text.x = element_markdown(size = 18),
+        axis.text.y = element_markdown(size = 18),
+        axis.title.x = element_text(size = 20, face = "bold"),
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 20),
+        legend.title =element_text(size = 20),
+        strip.background = element_blank(),strip.text=element_markdown(size = 20)) +
+  ggtitle("COVID-19: Exposed passengers by end of trip \n \nVaccination") + ylab("Mask usage") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Mean exposed passengers") +
+  geom_text(aes(x=Testing, y =  Mask, label = paste0(round(mean_E_pass,1),  " [", AR, "%]")), vjust = -1 ,size = 6) +
+  geom_text(aes(x=Testing, y = Mask, label = CI_pass_exp), vjust = 2.5, size = 5)
+
+#1400x600
+
+summary_exposed_plot%>%
+  filter(initial_infections == "I3") %>%
+  mutate(AR = round(mean_E_crew/800*100,1)) %>%
+  ggplot() + geom_tile(aes(x=Testing, y = Mask, fill = mean_E_crew), color = "black") +
+  facet_wrap(~Vaccination) +
+    theme_bw() + scale_x_discrete(labels = function(x) str_wrap(x, width = 5)) + theme_bw() + 
+   theme(legend.position = "",  
+        plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+        axis.text.x = element_text(size = 15),
+        axis.text.y = element_text(size = 15),
+        axis.title.x = element_text(size = 20, face = "bold"),
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 20),
+        legend.title =element_text(size = 20),
+        strip.background = element_blank(),strip.text=element_text(size = 15)) +
+  ggtitle("COVID-19: Exposed crew by end of trip \n \nVaccination") + ylab("Mask usage") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Mean exposed passengers")  +
+  geom_text(aes(x=Testing, y = Mask, label = paste0(round(mean_E_crew,1),  " [", AR, "%]")),vjust = -1, size = 6)  +
+  geom_text(aes(x=Testing, y = Mask, label = CI_crew_exp), vjust = 2.5, size = 5) 
+
+
+```
+
+## Number of people in isolation
+
+Create visualizations of cumulative number of agents in isolation by the end of the simulation by scenario.
+
+```{r}
+
+iso_I1 <- summary_iso_byday(results_daily_I1, LO = "No")
+iso_I1$initial_infections <- "I1"
+
+iso_I3 <- summary_iso_byday(results_daily_I3, LO = "No")
+iso_I3$initial_infections <- "I3"
+
+iso_I5 <-summary_iso_byday(results_daily_I5, LO = "No")
+iso_I5$initial_infections <- "I5"
+
+#SUMMARY ISOLATED
+results_summary_isolated <- bind_rows(iso_I1, iso_I3, iso_I5) %>%
+  filter(day == 7) %>%
+  select(-day)
+
+save(results_summary_isolated, file = "Results/Analysis/results_summary_isolated_covid.rdata")
+
+
+summary_isolated_plot <- results_summary_isolated %>%
+  left_join(scenarios) %>%
+  mutate(Vaccination = case_when(Vaccination == "X" ~ "None",
+                                 Vaccination == "L" ~ "Low",
+                                 Vaccination == "H" ~ "High"),
+         Testing = case_when(Testing == "X" ~ "None",
+                             Testing == "S" ~ "Sym",
+                             Testing == "ST" ~ "Sym + TG"),
+         Mask = case_when(Mask == "X" ~ "None",
+                          Mask == "L" ~ "Low",
+                          Mask == "M" ~ "Medium",
+                          Mask == "H" ~ "High")) %>%
+  mutate(Vaccination = factor(Vaccination, levels = c("None", "Low", "High")),
+         Testing = factor(Testing, levels = c("None", "Sym", "Sym + TG")),
+         Mask = factor(Mask, levels = c("None", "Low", "Medium", "High")))
+
+#labels
+# Apply custom labels directly to facet_wrap
+#summary_exposed_plot$Vaccination <- factor(summary_exposed_plot$Vaccination, levels = #unique(summary_exposed_plot$Vaccination))
+facet_labels <- custom_facet_labels(levels(summary_isolated_plot$Vaccination))
+
+#all isolated
+p1 <- summary_isolated_plot %>%
+  filter(initial_infections == "I3") %>%
+  #filter(day == 7) %>%
+  mutate(DR = round(mean_Q_pass/2000*100, 1)) %>%
+  ggplot() + geom_tile(aes(x=Testing, y = Mask, fill = mean_Q_pass), color = "black") +
+  facet_wrap(~Vaccination) +
+             #, labeller = labeller(Vaccination = facet_labels)) +
+    theme_bw() + 
+  #scale_x_discrete(labels = vax_mask_labels) + 
+  #scale_y_discrete(labels = vax_mask_labels) +
+   theme(legend.position = "",  
+        plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+        axis.text.x = element_markdown(size = 18),
+        axis.text.y = element_markdown(size = 18),
+        axis.title.x = element_text(size = 20, face = "bold"),
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 20),
+        legend.title =element_text(size = 20),
+        strip.background = element_blank(),strip.text=element_markdown(size = 18)) +
+  ggtitle("Vaccination") + ylab("Mask usage") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Mean exposed passengers") +
+  geom_text(aes(x=Testing, y = Mask, label = paste0(round(mean_Q_pass,1), " [", DR, "%]")), vjust = -1 ,size = 6) 
+
+p1 + geom_text(data = filter(summary_isolated_plot, initial_infections == "I3" & Testing != "None"),
+               aes(x=Testing, y = Mask, label = CI_pass_Q), vjust = 2.5, size = 5) +
+    ggtitle("COVID-19: Isolated passengers by end of trip \n \nVaccination") + ylab("Mask usage") 
+
+#1400 x 600
+
+#infected and not infected
+p2 <- summary_isolated_plot %>%
+  filter(initial_infections == "I3") %>%
+  #filter(day == 7) %>%
+  mutate(DR = round(mean_Q_crew/800*100, 1)) %>%
+  ggplot() + geom_tile(aes(x=Testing, y = Mask, fill = mean_Q_crew), color = "black") +
+  facet_wrap(~Vaccination) +
+             #, labeller = labeller(Vaccination = facet_labels)) +
+    theme_bw() + 
+  #scale_x_discrete(labels = vax_mask_labels) + 
+  #scale_y_discrete(labels = vax_mask_labels) +
+   theme(legend.position = "",  
+        plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+        axis.text.x = element_markdown(size = 18),
+        axis.text.y = element_markdown(size = 18),
+        axis.title.x = element_text(size = 20, face = "bold"),
+        axis.title.y = element_text(size = 20, face = "bold"),
+        legend.text = element_text(size = 20),
+        legend.title =element_text(size = 20),
+        strip.background = element_blank(),strip.text=element_markdown(size = 18)) +
+  ggtitle("Vaccination") + ylab("Mask usage") +
+  scale_fill_gradient(low = "white", high = "darkred", name = "Mean exposed passengers") +
+  geom_text(aes(x=Testing, y = Mask, label = paste0(round(mean_Q_crew,1), " [", DR, "%]")), vjust = -1 ,size = 6) 
+
+p2 + geom_text(data = filter(summary_isolated_plot, initial_infections == "I3" & Testing != "None"),
+               aes(x=Testing, y = Mask, label = CI_crew_Q), vjust = 2.5, size = 5) +
+    ggtitle("COVID-19: Isolated crew by end of trip \n \nVaccination") + ylab("Mask usage") 
+
+```
+
+## Number of people that displayed symptoms
+
+Create visualizations of cumulative number of agents who displayed symptoms by the end of the simulation by scenario.
+
+```{r}
+
+#Infections 1
+Is_I1 <- summary_symp_byday(results_unique_I1, vars = c("scenario", "day", "mean_Is_pass", "CI_pass_Is", "mean_Is_crew", "CI_crew_Is"),  LO = "No")
+Is_I1$initial_infections = "I1"
+
+Is_I3 <- summary_symp_byday(results_unique_I3,vars = c("scenario", "day", "mean_Is_pass", "CI_pass_Is", "mean_Is_crew", "CI_crew_Is"),  LO = "No")
+Is_I3$initial_infections = "I3"
+
+Is_I5 <- summary_symp_byday(results_unique_I5, vars = c("scenario", "day", "mean_Is_pass", "CI_pass_Is", "mean_Is_crew", "CI_crew_Is"),  LO = "No")
+Is_I5$initial_infections = "I5"
+
+#COMBINE
+results_summary_symp <- bind_rows(Is_I1, Is_I3, Is_I5) %>%
+  filter(day == 7) %>%
+  select(-day)
+
+save(results_summary_symp, file = "Results/Analysis/summary_symp_covid.rdata")
+
+
+
+```
+
+
+
+## Combine all outcomes 
+
+```{r}
+
+#combine exposed and isoalated
+results_summary_outcomes <- left_join(results_summary_exposed, results_summary_isolated,
+                              by = c("scenario", "LO", "initial_infections"))
+
+#add symptomatic
+results_summary_outcomes <- left_join(results_summary_outcomes, results_summary_symp,
+                              by = c("scenario", "LO", "initial_infections"))
+#add outbreaks
+results_summary_outcomes <- left_join(results_summary_outcomes, outbreak_covid,
+                                      by = c("scenario" = "Scenario", "initial_infections"))
+
+
+#calculate attack rate, 2000 is the number of passengers, 800 is the number of crew 
+results_summary_outcomes <- results_summary_outcomes %>%
+  mutate(AR_pass = round(mean_E_pass/2000*100,1),
+         AR_crew = round(mean_E_crew/800*100,1),
+         DR_pass = round(mean_Q_pass/2000*100,1),
+         DR_crew = round(mean_Q_crew/800*100,1),
+         SR_pass = round(mean_Is_pass/2000*100,1),
+         SR_crew = round(mean_Is_crew/800*100,1))
+
+#ADD CONVENTION
+scenarios_convention <- scenarios %>%
+  mutate(label = paste0(Vaccination,"_", Testing, "_", Mask))
+
+results_summary_outcomes <- left_join(results_summary_outcomes, scenarios_convention, by = "scenario")
+
+results_summary_outcomes <- results_summary_outcomes %>%
+  select(c(scenario, label, initial_infections,
+           count_exp, perc_exp, 
+           mean_E_pass, CI_pass_exp,
+           AR_pass,
+           mean_Is_pass, CI_pass_Is,
+           SR_pass, 
+           mean_Q_pass, CI_pass_Q,
+           DR_pass,
+           mean_E_crew, CI_crew_exp,
+           AR_crew,
+           mean_Is_crew, CI_crew_Is,
+           SR_crew,
+           mean_Q_pass, CI_crew_Q,
+           DR_crew))
+           
+           
+save(results_summary_outcomes, file = "Results/Analysis/results_summary_outcomes.rdata")           
+write.csv(results_summary_outcomes, file = "Results/Analysis/results_summary_outcomes.csv")
+
+```
+
